@@ -16,61 +16,61 @@
     tags:
     - docker
 
-- name: Add Docker official GPG key
-  remote_user: guodeo
-  apt_key:
-    url: https://download.docker.com/linux/ubuntu/gpg
-    state: present
-  tags:
-  - docker
+  - name: Add Docker official GPG key
+    remote_user: guodeo
+    apt_key:
+      url: https://download.docker.com/linux/ubuntu/gpg
+      state: present
+    tags:
+    - docker
 
-- name: Verify gpg key with fingerprint
-  apt_key:
-    id: 0EBFCD88
-    state: present
-  tags:
-  - docker
+  - name: Verify gpg key with fingerprint
+    apt_key:
+      id: 0EBFCD88
+      state: present
+    tags:
+    - docker
 
-- name: Set up the stable repository
-  remote_user: guodeo
-  apt_repository:
-    repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu xenial stable
-    state: present
-    update_cache: yes
-  tags:
-  - docker  
+  - name: Set up the stable repository
+    remote_user: guodeo
+    apt_repository:
+      repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu xenial stable
+      state: present
+      update_cache: yes
+    tags:
+    - docker  
 
-- name: Update apt packages
-  remote_user: guodeo
-  apt:
-    update_cache: yes
-  tags:
-  - docker
+  - name: Update apt packages
+    remote_user: guodeo
+    apt:
+      update_cache: yes
+    tags:
+    - docker
 
-- name: Install docker
-  remote_user: guodeo
-  apt:
-    name: "{{ item }}"
-    state: present
-    update_cache: yes
-  with_items:
-  - docker-ce
-  - docker-ce-cli
-  - containerd.io
-  tags:
-  - docker
+  - name: Install docker
+    remote_user: guodeo
+    apt:
+      name: "{{ item }}"
+      state: present
+      update_cache: yes
+    with_items:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    tags:
+    - docker
 
-- name: Add remote user to docker group
-  remote_user: guodeo
-  user:
-    name: "guodeo"
-    group: docker
-    append: yes
-  tags:
-  - docker
+  - name: Add remote user to docker group
+    remote_user: guodeo
+    user:
+      name: "guodeo"
+      group: docker
+      append: yes
+    tags:
+    - docker
 
-- name: Install docker-compose
-  get_url:
-    url : https://github.com/docker/compose/releases/download/v2.6.0/docker-compose-Linux-x86_64
-    dest: /usr/local/bin/docker-compose
-    mode: 'u+x,g+x'
+  - name: Install docker-compose
+    get_url:
+      url : https://github.com/docker/compose/releases/download/v2.6.0/docker-compose-Linux-x86_64
+      dest: /usr/local/bin/docker-compose
+      mode: 'u+x,g+x'
