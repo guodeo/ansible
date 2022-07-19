@@ -1,0 +1,12 @@
+version: "3.3"
+services:
+  api:
+    image: compass/api:latest
+    build: ./backend
+  nginx:
+    image: compass/nginx:latest
+    build: ./frontend
+    depends_on:
+      - api
+    ports: 
+      - "80:80"
