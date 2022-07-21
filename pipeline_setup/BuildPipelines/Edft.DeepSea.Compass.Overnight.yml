@@ -1,0 +1,72 @@
+trigger: none # Disable CI triggers.
+pr: none 
+
+schedules:
+- cron: "0 0 * * *"
+  displayName: Daily midnight build
+  branches:
+    include:
+    - main
+    exclude:
+    - feature/*
+  always: true
+
+pool: QuantitativeTrading
+
+jobs:
+- job: RUN_OVERNIGHT_TESTS 
+  displayName: Backend test and publish (example test run)
+  pool: 
+    name: QuantitativeTrading
+    demands: ["docker"]
+  steps:
+  - task: Bash@3
+    displayName: Collect test results from docker
+    inputs:
+      filePath: './Code/backend/build_and_test.sh'
+      arguments: '$(Common.TestResultsDirectory)'
+      workingDirectory: './Code/backend/'
+      failOnStderr: true      
+  - task: Bash@3
+    displayName: List files on disk
+    inputs:
+      targetType: 'inline'      
+      script: |
+        ls $(Common.TestResultsDirectory) -R
+      failOnStderr: true
+  - task: PublishTestResults@2
+    inputs:
+      testRunner: VSTest
+      testResultsFiles: '**/*.trx' 
+      searchFolder: '$(Common.TestResultsDirectory)'    
+
+
+- job: CLEAN_DOCKER
+  displayName: Clean up docker resources
+  pool: 
+    name: QuantitativeTrading
+    demands: ["docker"]
+  dependsOn: RUN_OVERNIGHT_TESTS
+  condition: succeededOrFailed()
+  steps:
+  - task: Bash@3
+    displayName: Clean up docker images
+    inputs:
+      targetType: 'inline'      
+      script: |
+        #clean up and list stopped containers                
+        docker ps --no-trunc --all
+        docker container prune -f
+        docker ps --no-trunc --all
+
+        #clean up and list dangling images 
+        docker image ls
+        docker image prune -f
+        docker image ls
+
+        #clean up and list dangling volumes
+        docker volume ls
+        docker volume prune -f
+        docker volume ls
+      failOnStderr: true
+

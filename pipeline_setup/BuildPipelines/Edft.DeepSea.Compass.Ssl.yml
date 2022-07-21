@@ -1,0 +1,111 @@
+trigger: none
+
+pool:
+  name: QuantitativeTrading
+
+parameters:
+- name: env
+  displayName: Select Environment
+  type: string
+  default: Dev
+  values:
+  - Dev
+  - Test
+  - UAT
+  - Prod  
+jobs:
+- job: publish
+  displayName: Publish build artifacts
+  steps:
+  - task: CopyFiles@2
+    inputs:
+      SourceFolder: '$(Build.SourcesDirectory)/SslCertificates'
+      Contents: '**'
+      TargetFolder: '$(Build.ArtifactStagingDirectory)'
+  - task: CopyFiles@2
+    inputs:
+      SourceFolder: '$(Build.SourcesDirectory)/Ssl'
+      Contents: '**'
+      TargetFolder: '$(Build.ArtifactStagingDirectory)'
+  - task: PublishBuildArtifacts@1
+    inputs:
+      PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+      ArtifactName: 'compass'
+      publishLocation: 'Container'
+- deployment: COMPASS_LINUX_VM_ENVIRONMENT
+  dependsOn: publish
+  displayName: Setup SSL in selected environment  
+  pool: 
+    name: QuantitativeTrading
+  environment: 
+   name: ${{ parameters.env }}
+   resourceType: VirtualMachine
+   tags: compass
+  variables:
+  - group: DeepSea.${{ parameters.env }}
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        - task: Bash@3
+          displayName: Initialise
+          inputs:
+            targetType: 'inline'
+            script: |
+              rm /usr/local/share/ca-certificates/combined.cer
+              rm -rf /opt/data/compass
+              mkdir /opt/data/compass
+        - task: DownloadBuildArtifacts@0
+          inputs:
+            buildType: 'current'
+            downloadType: 'single'
+            artifactName: 'compass'
+            downloadPath: '/opt/data/'
+        - task: Bash@3
+          displayName: Teardown existing containers
+          inputs:
+            targetType: 'inline'
+            script: |
+              docker compose -f docker-compose_http.yml -p compass down
+            workingDirectory: /opt/data/compass
+        - task: Bash@3
+          displayName: Update root certificates
+          inputs:
+            targetType: 'inline'
+            script: |
+              mv /opt/data/compass/combined.cer /usr/local/share/ca-certificates
+              update-ca-certificates
+        - task: Bash@3
+          displayName: Run certbot and start dummy site
+          env:
+            COMPASS_SSL_DOMAIN: $(Compass.Ssl.Domain)
+          inputs:
+            targetType: 'inline'   
+            script: |
+              docker compose -f docker-compose_http.yml -p compass up -d
+              docker compose -f docker-compose_http.yml -p compass run --rm certbot certonly --webroot --webroot-path /var/www/certbot/ --cert-name $(Compass.Ssl.Domain) --domains $(Compass.Ssl.Domain) --non-interactive --email $(Compass.Ssl.Email) --server https://acme.edftrading.com/acme/acme/directory --agree-tos --no-eff-email
+              docker compose -f docker-compose_https.yml -p compass up -d
+            workingDirectory: /opt/data/compass
+        - task: Bash@3
+          displayName: Smoke test
+          inputs:
+            targetType: 'inline'
+            script: |
+              if [ "$(curl -sL -w '%{http_code}' https://$(Compass.Ssl.Domain) -o /dev/null)" = "200" ]; then \
+                   echo "Success"; \
+                   else echo "Fail" >&2; \
+              fi            
+            failOnStderr: true
+        - task: Bash@3
+          displayName: Teardown dummy site
+          inputs:
+            targetType: 'inline'
+            script: |
+              docker compose -f docker-compose_https.yml -p compass down
+            workingDirectory: /opt/data/compass
+        - task: Bash@3
+          displayName: Clean up files
+          inputs:
+            targetType: 'inline'
+            script: |
+              rm -rf /opt/data/compass

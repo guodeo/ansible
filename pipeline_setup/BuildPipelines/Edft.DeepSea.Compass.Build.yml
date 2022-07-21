@@ -1,0 +1,145 @@
+trigger:
+- main
+
+pool: QuantitativeTrading
+
+jobs:
+- job: BUILD_AND_TEST_FRONTEND
+  displayName: Frontend test and publish
+  pool: 
+    name: QuantitativeTrading
+    demands: ["docker"]
+  steps:
+  - task: Bash@3
+    displayName: Collect test results from docker
+    inputs:
+      filePath: './Code/frontend/build_and_test.sh'
+      arguments: '$(Common.TestResultsDirectory)'
+      workingDirectory: './Code/frontend/'
+      failOnStderr: true
+  - task: Bash@3
+    displayName: Stop if any test errors
+    inputs:
+      filePath: './Code/frontend/has_errors.sh'
+      workingDirectory: './Code/frontend/'
+      failOnStderr: true
+  - task: Bash@3
+    displayName: List files on disk
+    inputs:
+      targetType: 'inline'      
+      script: |
+        ls $(Common.TestResultsDirectory) -R
+      failOnStderr: true
+  - task: PublishTestResults@2
+    inputs:
+      testResultsFormat: JUnit      
+      testResultsFiles: '**/*.xml' 
+      searchFolder: '$(Common.TestResultsDirectory)'
+  - task: Docker@2
+    displayName: Login to edftradingnonprod
+    inputs:
+      command: login
+      containerRegistry: Compass-DockerNonProdACR
+  - task: Bash@3
+    displayName: Tag and push images to ACR then cleanup
+    inputs:
+      targetType: 'inline'      
+      script: |
+        #publish to ACR then remove local container and images
+        docker image tag frontend edftradingnonprod.azurecr.io/compass/nginx
+        docker image push edftradingnonprod.azurecr.io/compass/nginx
+
+        #list containers                
+        docker ps --no-trunc --all
+
+        #clean up and list images
+        docker rmi frontend:latest
+        docker rmi edftradingnonprod.azurecr.io/compass/nginx
+        docker image ls
+      failOnStderr: true
+
+- job: BUILD_AND_TEST_BACKEND
+  displayName: Backend test and publish
+  pool: 
+    name: QuantitativeTrading
+    demands: ["docker"]
+  steps:
+  - task: Bash@3
+    displayName: Collect test results from docker
+    inputs:
+      filePath: './Code/backend/build_and_test.sh'
+      arguments: '$(Common.TestResultsDirectory)'
+      workingDirectory: './Code/backend/'
+      failOnStderr: true      
+  - task: Bash@3
+    displayName: List files on disk
+    inputs:
+      targetType: 'inline'      
+      script: |
+        ls $(Common.TestResultsDirectory) -R
+      failOnStderr: true
+  - task: PublishTestResults@2
+    inputs:
+      testRunner: VSTest
+      testResultsFiles: '**/*.trx' 
+      searchFolder: '$(Common.TestResultsDirectory)'
+  - task: Docker@2
+    displayName: Login to edftradingnonprod
+    inputs:
+      command: login
+      containerRegistry: Compass-DockerNonProdACR
+  - task: Bash@3
+    displayName: Tag and push images to ACR then cleanup
+    inputs:
+      targetType: 'inline'      
+      script: |
+        #publish to ACR then remove local container and images
+        docker image tag compassapi edftradingnonprod.azurecr.io/compass/api
+        docker image push edftradingnonprod.azurecr.io/compass/api
+
+        #list containers                
+        docker ps --no-trunc --all
+
+        #clean up and list images
+        docker rmi compassapi:latest
+        docker rmi edftradingnonprod.azurecr.io/compass/api
+        docker image ls
+      failOnStderr: true  
+  # - task: CopyFiles@2
+  #   displayName: Copy docker compose file
+  #   inputs:      
+  #     SourceFolder: '$(Build.SourcesDirectory)/Deployment'
+  #     contents: '*.yml'
+  #     targetFolder: $(Build.ArtifactStagingDirectory)
+  # - task: PublishBuildArtifacts@1
+  #   displayName: Publish docker compose file
+  #   inputs:
+  #     pathToPublish: $(Build.ArtifactStagingDirectory)/docker-compose.yml
+  #     artifactName: dockerComposeFile
+
+- job: SONARCUBE
+  displayName: Run backend SonarCube statuc analysis
+  steps:
+  - task: DotNetCoreCLI@2
+    displayName: Restore Api
+    inputs:
+      command: 'restore'
+      projects: '**/Edft.DeepSea.Compass.Api.csproj'    
+  - task: SonarQubePrepare@4
+    displayName: 'Prepare analysis on SonarQube'
+    inputs:
+      SonarQube: 'SonarqubeCompass'
+      scannerMode: 'MSBuild'
+      projectKey: 'Deep_Sea_Edft.DeepSea.Compass'
+  - task: DotNetCoreCLI@2
+    displayName: Build Api
+    inputs:
+      command: 'build'
+      projects: '**/Edft.DeepSea.Compass.Api.csproj'    
+  - task: SonarQubeAnalyze@4
+    displayName: 'Run Code Analysis'
+  - task: SonarQubePublish@4
+    displayName: 'Publish Quality Gate Result'
+    inputs:
+      pollingTimeoutSec: '300'   
+    

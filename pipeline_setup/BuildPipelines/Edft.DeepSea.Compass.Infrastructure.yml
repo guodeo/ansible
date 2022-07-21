@@ -1,0 +1,65 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- main
+
+pool: 
+  name: QuantitativeTrading
+
+parameters:
+- name: env
+  displayName: Select Environment
+  type: string
+  default: Dev
+  values:
+  - Dev
+  - Test
+  - UAT
+  - Prod
+
+jobs:
+- deployment: COMPASS_LINUX_VM_ENVIRONMENT
+  displayName: Deploy infrastructure to selected environment  
+  pool: 
+    name: QuantitativeTrading
+  environment: 
+   name: ${{ parameters.env }}
+   resourceType: VirtualMachine
+   tags: compass
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        - task: Bash@3
+          displayName: Install docker
+          inputs:
+            noProfile: false
+            targetType: 'inline'
+            script: |                            
+              sudo apt-get update
+              sudo apt-get install ca-certificates curl gnupg lsb-release -y
+              sudo mkdir -p /etc/apt/keyrings
+              sudo rm /etc/apt/keyrings/docker.gpg
+              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+              echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+              sudo apt-get update
+              sudo apt-get install docker-ce=5:20.10.17~3-0~ubuntu-bionic docker-ce-cli=5:20.10.17~3-0~ubuntu-bionic containerd.io docker-compose-plugin -y
+              sh -c "cat >> /etc/docker/daemon.json <<EOL
+              {
+                  \"data-root\": \"/opt/data/docker-data\",
+                  \"storage-driver\": \"overlay2\",
+                  \"log-driver\": \"local\",
+                  \"log-opts\": {
+                      \"max-size\": \"512m\",
+                      \"max-file\": \"3\"
+                  }
+              }
+              EOL"
+              systemctl daemon-reload
+              systemctl restart docker
+              sed -i '/SystemMaxUse=/c SystemMaxUse=100M' /etc/systemd/journald.conf
+              systemctl restart systemd-journald
+              journalctl --rotate

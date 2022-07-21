@@ -1,0 +1,112 @@
+trigger: none
+
+pool:
+  name: QuantitativeTrading
+
+parameters:
+- name: env
+  displayName: Select Environment
+  type: string
+  default: Dev
+  values:
+  - Dev
+  - Test
+  - UAT
+  - Prod 
+- name: tag
+  displayName: Select Tag
+  type: string
+  default: latest
+jobs:
+- job: publish
+  displayName: Publish build artifacts
+  steps:
+  - task: CopyFiles@2
+    inputs:
+      SourceFolder: '$(Build.SourcesDirectory)/SslCertificates'
+      Contents: '**'
+      TargetFolder: '$(Build.ArtifactStagingDirectory)'
+  - task: CopyFiles@2
+    inputs:
+      SourceFolder: '$(Build.SourcesDirectory)/Code/Release'
+      Contents: '**'
+      TargetFolder: '$(Build.ArtifactStagingDirectory)'
+  - task: PublishBuildArtifacts@1
+    inputs:
+      PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+      ArtifactName: 'compass'
+      publishLocation: 'Container'
+
+- deployment: COMPASS_LINUX_VM_ENVIRONMENT
+  dependsOn: publish
+  displayName: Deploy to selected environment  
+  pool: 
+    name: QuantitativeTrading
+  environment: 
+   name: ${{ parameters.env }}
+   resourceType: VirtualMachine
+   tags: compass
+  variables:
+  - group: DeepSea.${{ parameters.env }}
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        - task: Bash@3
+          displayName: Initialise
+          inputs:
+            targetType: 'inline'
+            script: |
+              rm /usr/local/share/ca-certificates/combined.cer
+              rm /etc/cron.d/compass-nginx-reload
+              rm -rf /opt/data/compass
+              mkdir /opt/data/compass
+        - task: DownloadBuildArtifacts@0
+          inputs:
+            buildType: 'current'
+            downloadType: 'single'
+            artifactName: 'compass'
+            downloadPath: /opt/data/
+        - task: Bash@3
+          displayName: Update root certificates
+          inputs:
+            targetType: 'inline'
+            script: |
+              mv /opt/data/compass/combined.cer /usr/local/share/ca-certificates
+              update-ca-certificates
+        - task: Docker@2
+          displayName: Login to edftradingnonprod
+          inputs:
+            command: login
+            containerRegistry: Compass-DockerNonProdACR
+        - task: Bash@3
+          displayName: Run docker compose up
+          env:
+            COMPASS_CONTAINER_REGISTRY: $(Docker.ContainerRegistry)
+            COMPASS_SSL_DOMAIN: $(Compass.Ssl.Domain)
+            COMPASS_TAG: ${{parameters.tag}}
+          inputs:
+            targetType: 'inline'   
+            script: |
+              echo ${COMPASS_CONTAINER_REGISTRY}
+              echo ${COMPASS_SSL_DOMAIN}
+              echo ${COMPASS_TAG}
+              docker compose pull && docker compose up -d
+            workingDirectory: /opt/data/compass
+        - task: Bash@3
+          displayName: Smoke test
+          inputs:
+            targetType: 'inline'
+            script: |
+              if [ "$(curl -sL -w '%{http_code}' https://$(Compass.Ssl.Domain) -o /dev/null)" = "200" ]; then \
+                   echo "Success"; \
+                   else echo "Fail" >&2; \
+              fi            
+            failOnStderr: true
+        - task: Bash@3
+          displayName: Add cron job to reload nginx config
+          inputs:
+            targetType: 'inline'
+            script: |
+              echo "0 */6 * * * root docker exec compass-nginx-1 nginx -s reload" >> /etc/cron.d/compass-nginx-reload
+            failOnStderr: true
