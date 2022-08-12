@@ -1,0 +1,98 @@
+trigger:
+  - main
+
+pool:
+  name: QuantitativeTrading
+  demands: agent.os -equals Windows_NT
+
+parameters:
+- name: BuildConfiguration
+  displayName: Build configuration
+  type: string
+  default: Release
+  values:
+    - Debug
+    - Release
+
+jobs:
+- job: Build_E2E_tests
+  displayName: Build E2E tests
+  pool:
+    name: QuantitativeTrading
+    demands: agent.os -equals Windows_NT
+  steps:
+  - checkout: self
+    clean: true
+  - task: DotNetCoreCLI@2
+    displayName: Restore
+    inputs:
+      command: restore
+      projects: '**/Compass.E2E.Spec.csproj'
+  - task: DotNetCoreCLI@2
+    displayName: Build
+    inputs:
+      command: build
+      projects: '**/Compass.E2E.Spec.csproj'
+      arguments: --configuration ${{parameters.BuildConfiguration}}
+  - task: DotNetCoreCLI@2
+    displayName: Publish
+    inputs:
+     command: publish
+     publishWebProjects: false
+     projects: '**/Compass.E2E.Spec.csproj'
+     arguments: --configuration ${{parameters.BuildConfiguration}} --output $(build.artifactstagingdirectory)  -r win10-x64
+     zipAfterPublish: false
+     modifyOutputPath: false
+  - task: PublishBuildArtifacts@1
+    displayName: Publish Artifact
+    inputs:
+      ArtifactName: 'compass_e2e_build_artifact'
+      PathtoPublish: $(Build.ArtifactStagingDirectory)
+
+- job: Run_E2E_Tests
+  dependsOn: Build_E2E_tests
+  displayName: Run E2E Tests
+  pool:
+    name: QuantitativeTrading
+    demands: agent.os -equals Windows_NT
+  steps:
+  - task: DownloadBuildArtifacts@0
+    displayName: Download Build Artifacts
+    inputs:
+      buildType: 'current'
+      downloadType: 'single'
+      artifactName: 'compass_e2e_build_artifact'
+      downloadPath: 'D:\Applications\E2E\'
+
+  - task: PowerShell@2
+    displayName: Show folder contents
+    inputs:
+      targetType: inline
+      script: |
+        echo 'pwd below:'
+        pwd
+        echo 'current folder content'
+        ls .
+        echo 'list D:\Applications\E2E\compass_e2e_build_artifact below:'
+        ls D:\Applications\E2E\compass_e2e_build_artifact
+  - task: PowerShell@2
+    displayName: install Playwright
+    inputs:
+      targetType: inline
+      script: |
+        cd D:/Applications/E2E/compass_e2e_build_artifact/.playwright/node/win32_x64/
+        ./playwright.cmd install
+
+  - task: DotNetCoreCLI@2
+    displayName: Run E2E tests
+    inputs:
+      command: 'test'
+      workingDirectory: 'D:\Applications\E2E\compass_e2e_build_artifact\'
+      projects: 'D:\Applications\E2E\compass_e2e_build_artifact\Compass.E2E.Spec.dll'
+  
+  - task: SpecFlowPlus@0
+    inputs:
+      generatorSource: 'TestAssembly'
+      testAssemblyFilePath: 'D:\Applications\E2E\compass_e2e_build_artifact\Compass.E2E.Spec.dll'
+      testExecutionJson: 'D:\Applications\E2E\compass_e2e_build_artifact\TestExecution.json'
+      

@@ -1,0 +1,98 @@
+trigger:
+  - main
+  
+pool:
+  name: QuantitativeTrading
+
+parameters:
+- name: env
+  displayName: Select Environment
+  type: string
+  default: Dev
+  values:
+  - Dev
+  - Test
+  - UAT
+  - Prod 
+- name: BuildConfiguration
+  displayName: Build configuration
+  type: string
+  default: Release
+  values:
+    - Debug
+    - Release
+
+jobs:
+- job: Run_E2E_tests
+  displayName: Run E2E tests
+  pool:
+    name: QuantitativeTrading
+    demands: docker
+  variables:
+  - group: DeepSea.${{ parameters.env }}
+  steps:
+  - checkout: self
+    clean: true
+  - task: Bash@3
+    displayName: Run e2e tests in docker and copy test results out of the container
+    env:
+      COMPASS_SSL_DOMAIN: $(Compass.Ssl.Domain)
+      COMPASS_APP_AUTH_RESOURCEURI: $(Compass.App.Auth.ResourceUri)
+    inputs:
+      filePath: './QA/Compass.E2E.Spec/run_e2e_tests.sh'
+      failOnStderr: false
+  - task: Bash@3
+    displayName: print files in folder
+    inputs:
+      targetType: inline
+      script: |
+        echo 'print pwd:'
+        pwd
+        echo '****** print files in ./QA/Compass.E2E.Spec/'
+        ls ./QA/Compass.E2E.Spec/
+        echo '****** print files in current directory'
+        ls .
+        echo '****** System.DefaultWorkingDirectory'
+        ls $(System.DefaultWorkingDirectory)
+        echo '****** Pipeline.Workspace: $(Pipeline.Workspace)'
+        ls $(Pipeline.Workspace)
+  - task: CopyFiles@2
+    displayName: Copy files needed for living doc to build folder
+    inputs:
+      SourceFolder: $(System.DefaultWorkingDirectory)
+      Contents: |
+        Compass.E2E.Spec.dll
+        TestExecution.json
+      TargetFolder: $(Build.ArtifactStagingDirectory)
+  - task: Bash@3
+    displayName: check files in build artifactory
+    inputs:
+      targetType: inline
+      script: |
+        echo 'print $(Build.ArtifactStagingDirectory)'
+        ls $(Build.ArtifactStagingDirectory)      
+  - task: PublishBuildArtifacts@1
+    displayName: publish test results in pipeline artifact staging directory
+    inputs:
+      targetPath: '$(Build.ArtifactStagingDirectory)'
+      ArtifactName: drop
+
+- job: Test_Results
+  displayName: Generate living documentation
+  dependsOn: Run_E2E_tests
+  pool: 
+    name: QuantitativeTrading
+    demands: agent.os -equals Windows_NT
+  steps:
+  - task: DownloadBuildArtifacts@0
+    inputs:
+      buildType: 'current'
+      downloadType: 'single'
+      artifactName: 'drop'
+      downloadPath: 'D:\Applications\E2E\docker\'
+
+  - task: SpecFlowPlus@0
+    inputs:
+      generatorSource: 'TestAssembly'
+      testAssemblyFilePath: 'D:\Applications\E2E\docker\drop\Compass.E2E.Spec.dll'
+      testExecutionJson: 'D:\Applications\E2E\docker\drop\TestExecution.json'
